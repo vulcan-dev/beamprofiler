@@ -21,7 +21,7 @@ There's not many options but you can change the history (1 - 30 seconds) and you
 ![Graphs](https://i.imgur.com/NQxKLzb.png)
 
 ## How to use
-1. Download the latest release from [here](https://github.com/vulcan-dev/beamprofiler)  
+1. Download the latest release from [here](https://github.com/vulcan-dev/beamprofiler/releases)  
 2. Go into the archive and extract the files  
 3. Copy "beamprofiler.zip" (from the archive, not the archive itself) to the BeamNG's mod directory  
 4. Run BeamProfiler.exe
