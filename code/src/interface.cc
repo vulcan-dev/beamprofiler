@@ -28,10 +28,14 @@ ImVec2 find_window_pos(HWND foreground_window, const uint32_t width, const uint3
     monitor_info.cbSize = sizeof(MONITORINFO);
     GetMonitorInfo(monitor, &monitor_info);
 
-    float center_x = (float)(monitor_info.rcWork.left + monitor_info.rcWork.right - width) / 2;
-    float center_y = (float)(monitor_info.rcWork.top + monitor_info.rcWork.bottom - height) / 2;
+    int monitor_width = monitor_info.rcMonitor.right - monitor_info.rcMonitor.left;
+    int monitor_height = monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top;
 
-    return ImVec2(center_x, center_y);
+    if ((int)width > monitor_width || (int)height > monitor_height)
+        return ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
+    return ImVec2((float)monitor_info.rcMonitor.left + (monitor_width - width) / 2,
+                  (float)monitor_info.rcMonitor.top + (monitor_height - height) / 2);
 }
 
 // Graph Functions
@@ -89,10 +93,26 @@ void interface_thread(void* udata)
 #if defined(_WIN32)
     pos = find_window_pos(render_data->foreground_window, window_width, window_height);
 #else
-    pos ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    pos = ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 #endif
 
     SDL_Window* window = SDL_CreateWindow("BeamProfiler", (int)pos.x, (int)pos.y, window_width, window_height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    if (!window)
+    {
+        char sdl_err[256];
+        SDL_GetErrorMsg(sdl_err, 256);
+
+        WCHAR final_message[1024];
+        swprintf(final_message, 1024, L"Could not create window: %hs", sdl_err);
+
+#if defined(_WIN32)
+        MessageBoxW(NULL, final_message, L"BeamProfiler Error", MB_OK | MB_ICONERROR);
+#endif
+
+        fwprintf(stderr, final_message);
+        render_data->request_close = true;
+    }
+
     SDL_GLContext gl_ctx = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, gl_ctx);
     SDL_GL_SetSwapInterval(1);

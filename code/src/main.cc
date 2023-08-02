@@ -99,9 +99,8 @@ BP_SOCKET create_socket(const char* address, const int port)
 
 #if defined(BP_PLATFORM_WINDOWS)
 int APIENTRY WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR cmdline, int cmdshow) {
-#if defined(_DEBUG) // Create console if debug build.
     HWND foreground_window = GetForegroundWindow();
-
+#if defined(_DEBUG) // Create console if debug build.
     if (AllocConsole())
     {
         FILE* f;
@@ -158,7 +157,7 @@ int main(void) {
         render_data->can_read = false; // Everything else was fine, we just couldn't reach the IP
     }
 
-#if defined(_WIN32) && defined(_DEBUG)
+#if defined(_WIN32)
     render_data->foreground_window = foreground_window;
 #endif
 
