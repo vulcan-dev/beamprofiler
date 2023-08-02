@@ -30,7 +30,7 @@ set(SOURCES
 
 find_package(SDL2 REQUIRED)
 
-add_executable(${PROJECT_NAME} WIN32 ${SOURCES})
+add_executable(${PROJECT_NAME} WIN32 ${SOURCES} res/app.o)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 11)
 target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIR} code/include deps/imgui deps/imgui/backends deps/implot)
 target_link_libraries(${PROJECT_NAME} SDL2::SDL2 opengl32)
