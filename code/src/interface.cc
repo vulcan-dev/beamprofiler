@@ -14,20 +14,15 @@
 
 // Utility
 //------------------------------------------------------------------------
-ImVec2 find_window_pos(const uint32_t width, const uint32_t height)
+ImVec2 find_window_pos(HWND foreground_window, const uint32_t width, const uint32_t height)
 {
-#if !defined(_WIN32)
-    return ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-#endif
-
     // On Windows, we want to find the previous window and put it on that monitor.
     // Say you have the game on the left monitor and file explorer on the right,
     // if you double click this in the file explorer, you want it to open on that monitor. Well, I do anyways.
-    HWND active_window = GetForegroundWindow();
-    if (!active_window)
+    if (!foreground_window)
         return ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    HMONITOR monitor = MonitorFromWindow(active_window, MONITOR_DEFAULTTONEAREST);
+    HMONITOR monitor = MonitorFromWindow(foreground_window, MONITOR_DEFAULTTONEAREST);
 
     MONITORINFO monitor_info;
     monitor_info.cbSize = sizeof(MONITORINFO);
@@ -76,6 +71,9 @@ void draw_graph_element(graph_element_t elem, float history, float time, ImVec2 
 //------------------------------------------------------------------------
 void interface_thread(void* udata)
 {
+    render_thread_data_t* render_data = (render_thread_data_t*)udata;
+    profiler_t* profiler_data = &render_data->data;
+
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -87,17 +85,11 @@ void interface_thread(void* udata)
     int window_width = 800;
     int window_height = 600;
 
-    ImVec2 pos = find_window_pos(window_width, window_height);
-#if defined(_WIN32) && defined(_DEBUG) // Create console if debug build.
-    if (AllocConsole())                // Have to do it after "find_window_pos", other wise it will just find the console window.
-    {
-        FILE* f;
-        freopen_s(&f, "conout$", "w", stdout);
-        freopen_s(&f, "conout$", "w", stderr);
-    } else
-    {
-        MessageBoxW(NULL, L"AllocConsole Failed! Continuing without console", L"BeamProfiler", MB_OK | MB_ICONERROR);
-    }
+    ImVec2 pos;
+#if defined(_WIN32)
+    pos = find_window_pos(render_data->foreground_window, window_width, window_height);
+#else
+    pos ImVec2(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 #endif
 
     SDL_Window* window = SDL_CreateWindow("BeamProfiler", (int)pos.x, (int)pos.y, window_width, window_height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
@@ -118,11 +110,8 @@ void interface_thread(void* udata)
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-    render_data_t* render_data = (render_data_t*)udata;
-    profiler_t* profiler_data = &render_data->data;
-
     // Render variables
-    uint32_t target_fps = 30;
+    uint32_t target_fps = render_data->config.fps_limit;
     uint32_t target_frame_time = 1000 / target_fps;
     Uint32 frame_time = 0;
     int frame_count = 0;
@@ -159,7 +148,7 @@ void interface_thread(void* udata)
 
     float time = 0;
     float old_time = 0.0f; // old_history is used when resetting or changing vehicles
-    float history = 10.0f;
+    float history = render_data->config.history;
     float paused_time = 0.0f;
 
     ImPlotContext* plot_ctx = ImPlot::CreateContext();
@@ -188,15 +177,16 @@ void interface_thread(void* udata)
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        time += ImGui::GetIO().DeltaTime * profiler_data->bullet_time;
+        if (render_data->connected)
+            time += ImGui::GetIO().DeltaTime * profiler_data->bullet_time;
 
         // Check queue
         {
+            render_data->queue_mtx.lock();
             const size_t queue_len = render_data->queue.size();
             if (queue_len > 0)
             {
                 const char op = render_data->queue.back();
-                printf("%c\n", op);
                 switch ((operation_e)op)
                 {
                     case operation_e::op_reset:
@@ -209,6 +199,7 @@ void interface_thread(void* udata)
                     }
                 }
             }
+            render_data->queue_mtx.unlock();
         }
 
         {
@@ -230,12 +221,66 @@ void interface_thread(void* udata)
                     {
                         if (ImGui::SliderFloat("History", &history, 1, 30, "%.1f s"))
                         {
+                            // I could actually limit this (ctrl+left click to bypass), but there's no need.
+                            // I had to do it with the FPS limit though, setting it to 0 = crash
+
                             old_time = time; // Reset the current graphs
                             time = history;
+
+                            render_data->config.history = history;
+                            config_save(&render_data->config);
                         }
 
                         if (ImGui::SliderInt("FPS Limit", &(int)target_fps, 15, 240))
-                            target_frame_time = 1000 / target_fps;
+                        {
+                            if (target_fps >= 15 && target_fps <= 240)
+                            {
+                                target_frame_time = 1000 / target_fps;
+
+                                render_data->config.fps_limit = target_fps;
+                                config_save(&render_data->config);
+                            } else
+                            {
+                                target_fps = render_data->config.fps_limit;
+                            }
+                        }
+
+                        { // Connection
+                            ImGui::Text("Connection");
+                            ImGui::Separator();
+
+                            { // Input Address
+                                ImGui::Text("Address");
+                                ImGui::PushItemWidth(40);
+                                ImGui::InputScalar("##ip_part1", ImGuiDataType_U8, &render_data->config.ip[0], nullptr, nullptr, "%u");
+                                ImGui::SameLine();
+                                ImGui::Text(".");
+                                ImGui::SameLine();
+
+                                ImGui::InputScalar("##ip_part2", ImGuiDataType_U8, &render_data->config.ip[1], nullptr, nullptr, "%u");
+                                ImGui::SameLine();
+                                ImGui::Text(".");
+                                ImGui::SameLine();
+
+                                ImGui::InputScalar("##ip_part3", ImGuiDataType_U8, &render_data->config.ip[2], nullptr, nullptr, "%u");
+                                ImGui::SameLine();
+                                ImGui::Text(".");
+                                ImGui::SameLine();
+
+                                ImGui::InputScalar("##ip_part4", ImGuiDataType_U8, &render_data->config.ip[3], nullptr, nullptr, "%u");
+                                ImGui::PopItemWidth();
+                            }
+
+                            { // Input Port
+                                ImGui::InputInt("Port", &render_data->config.port);
+                            }
+
+                            if (ImGui::Button("Connect"))
+                            {
+                                render_data->requested_connect = true;
+                                config_save(&render_data->config);
+                            }
+                        }
 
                         ImGui::EndMenu();
                     }

@@ -2,7 +2,11 @@
 
 #include "common/common.h"
 #include "beamprofiler.h"
+#include "interface.h"
+#include "config.h"
 #include <cstdio>
+
+// TODO: Add back the ability to have multiple instances once you can change IP & Port
 
 #if defined(BP_PLATFORM_WINDOWS)
 HANDLE mutex_handle;
@@ -78,8 +82,37 @@ void exit_error(BP_SOCKET sock, const char* message, ...)
     exit(-1);
 }
 
+BP_SOCKET create_socket(const char* address, const int port)
+{
+    BP_SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket < 0)
+        return -1;
+
+    if (net::set_timeout(sock, 100) < 0)
+        return -1;
+
+    if (!net::connect(sock, address, port))
+        return 0;
+
+    return sock;
+}
+
 #if defined(BP_PLATFORM_WINDOWS)
 int APIENTRY WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR cmdline, int cmdshow) {
+#if defined(_DEBUG) // Create console if debug build.
+    HWND foreground_window = GetForegroundWindow();
+
+    if (AllocConsole())
+    {
+        FILE* f;
+        freopen_s(&f, "conout$", "w", stdout);
+        freopen_s(&f, "conout$", "w", stderr);
+    } else
+    {
+        MessageBoxW(NULL, L"AllocConsole Failed! Continuing without console", L"BeamProfiler", MB_OK | MB_ICONERROR);
+    }
+#endif
+
     const TCHAR mutex_name[] = "BeamProfiler";
     mutex_handle = CreateMutex(NULL, TRUE, mutex_name);
     if (mutex_handle != NULL && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -104,23 +137,38 @@ int main(void) {
     if (!net::init())
         exit_error(NULL, "Failed to initialize Winsock! Error Code: %d", net::last_error());
 
-    BP_SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket < 0)
-        exit_error(sock, "Failed to create socket, error code: %d", net::last_error());
+    render_thread_data_t* render_data = new render_thread_data_t;
+    render_data->data.bullet_time = 1;
+    render_data->can_read = true;
 
-    if (net::set_timeout(sock, 100) < 0)
-        exit_error(sock, "Failed to set timeout for socket, error code: %d", net::last_error());
+    if (!config_load(&render_data->config))
+    {
+        delete render_data;
+        exit_error(NULL, "Invalid config, please delete it and re-run BeamProfiler");
+    }
 
-    if (!net::connect(sock, "127.0.0.1", 4444))
-        exit_error(sock, "Failed to connect, error code: %d", net::last_error());
+    BP_SOCKET sock = create_socket(config_get_ip(&render_data->config).c_str(), render_data->config.port);
+    if (sock == -1)
+    {
+        delete render_data;
+        exit_error(sock, "Failed to create socket, last error: %d", net::last_error());
+    } else if (sock == 0)
+    {
+        render_data->connected = false;
+        render_data->can_read = false; // Everything else was fine, we just couldn't reach the IP
+    }
 
-    render_data_t* render_data = new render_data_t;
+#if defined(_WIN32) && defined(_DEBUG)
+    render_data->foreground_window = foreground_window;
+#endif
+
     render_data->request_close = false;
+    render_data->requested_connect = false;
 
     char buf[BUFLEN];
     
+    bp::thread render_thread;
     { // Start render thread
-        bp::thread render_thread;
         render_thread.start(interface_thread, (void*)render_data);
         render_thread.detach();
     }
@@ -131,6 +179,32 @@ int main(void) {
 
         while (!render_data->request_close)
         {
+            // Check if we tried to connect to new address
+            if (render_data->requested_connect)
+            {
+                render_data->requested_connect = false;
+
+                net::close(sock);
+
+                sock = create_socket(config_get_ip(&render_data->config).c_str(), render_data->config.port);
+                if (sock == NULL)
+                {
+                    render_data->can_read = false;
+                    render_data->connected = false;
+                } else
+                {
+                    render_data->can_read = true;
+                }
+
+                render_data->queue_mtx.lock();
+                render_data->queue.push_back(operation_e::op_reset);
+                render_data->queue_mtx.unlock();
+                continue;
+            }
+
+            if (!render_data->can_read)
+                continue;
+
             int recv_len = recvfrom(sock, buf, BUFLEN, 0, (struct sockaddr*)&remote, &remote_len);
             if (recv_len == -1)
             {
@@ -145,14 +219,17 @@ int main(void) {
             if (recv_len == 1)
             {
                 const char received_value = *buf - '0';
+                render_data->queue_mtx.lock();
                 render_data->queue.push_back(received_value);
+                render_data->queue_mtx.unlock();
             } else
             {
                 memcpy(&render_data->data, buf, sizeof(profiler_t));
             }
         }
     }
-
+    
+    render_thread.join();
     delete render_data;
 
     net::close(sock);

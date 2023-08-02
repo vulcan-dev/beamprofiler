@@ -5,6 +5,7 @@ set(SOURCES
     code/src/main.cc
     code/src/interface.cc code/include/interface.h
     code/include/beamprofiler.h
+    code/src/config.cc code/include/config.h
 
     # ImGui
     deps/imgui/imgui.cpp deps/imgui/imgui.h

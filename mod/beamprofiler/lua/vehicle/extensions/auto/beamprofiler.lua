@@ -3,8 +3,10 @@ local M = {}
 local ffi = require("ffi")
 local socket = require("socket")
 
-local ip = "127.0.0.1"
-local port = 4444
+local connection = {
+    address = "127.0.0.1",
+    port = 4444
+}
 
 local udp_socket = nil
 
@@ -12,6 +14,14 @@ local operations = {
     op_none = 0, -- TODO: Remove
     op_reset = 1
 }
+
+M.set_address = function(address)
+    connection.address = address
+end
+
+M.set_ip = function(port)
+    connection.port = port
+end
 
 -- TODO: Instead of doing the units on the C++ side, just do them here.
 pcall(function()
@@ -141,7 +151,7 @@ local function dispatch_data(delta)
 
     -- Send UDP Packet
     local packet = ffi.string(profiler, ffi.sizeof(profiler))
-    udp_socket:sendto(packet, ip, port)
+    udp_socket:sendto(packet, connection.address, connection.port)
 end
 
 -- Game Hooks
@@ -150,14 +160,14 @@ local function onExtensionLoaded()
     if udp_socket then udp:close() end
     udp_socket = socket.udp()
 
-    udp_socket:sendto(tostring(operations.op_reset), ip, port)
+    udp_socket:sendto(tostring(operations.op_reset), connection.address, connection.port)
     log('I', "onExtensionLoaded", "Sending reset operation")
 end
 
 local function onReset()
     if not playerInfo.firstPlayerSeated then return end
     log('I', "onReset", "Sending reset operation")
-    udp_socket:sendto(tostring(operations.op_reset), ip, port)
+    udp_socket:sendto(tostring(operations.op_reset), connection.address, connection.port)
 end
 
 local function updateGFX(delta)

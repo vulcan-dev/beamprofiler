@@ -1,3 +1,5 @@
 *.10x
 build/
 releases/
+config.json
+imgui.ini

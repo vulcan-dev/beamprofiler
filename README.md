@@ -26,7 +26,11 @@ There's not many options but you can change the history (1 - 30 seconds) and you
 3. Copy "beamprofiler.zip" (from the archive, not the archive itself) to the BeamNG's mod directory  
 4. Run BeamProfiler.exe
 
-The port it uses is `4444`, the IP is localhost. You'll be able to change this in the future.
+### To change IP & Port, you must:
+Change it inside of the profiler  
+Open the in-game console, press on the bottom left dropdown and change to your vehicle. Once done, you can use the following functions:
+- `beamprofiler.set_port(4444)`
+- `beamprofiler.set_address("127.0.0.1")`
 
 ## Why did I make this?
 I just enjoy watching the data move in realtime, it's nice.  
